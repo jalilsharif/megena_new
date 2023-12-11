@@ -1,3 +1,4 @@
+
 count.FD <- function(rho,thresh.vec,direction = "ascending")
 {
   # combine threshold and correlation values for efficiency
@@ -58,30 +59,75 @@ calculate.rho.signed <- function(datExpr,n.perm,FDR.cutoff,estimator = "pearson"
   set.seed(1234)
   nc <- nrow(datExpr)
   perm.ind <- replicate(n.perm, sample(nc), simplify = FALSE)
+  # Define the permute_and_count function
   permute_and_count <- function(i) {
+    
+    count.FD <- function(rho,thresh.vec,direction = "ascending")
+    {
+      # combine threshold and correlation values for efficiency
+      n.rho <- length(rho)
+      label.vec <- c(rep(1,length(rho)),rep(0,length(thresh.vec)));# label correlation value and threshold value
+      rho <- c(rho,thresh.vec)# combine correlation and threhold values for efficiency.
+      
+      if (direction == "ascending")
+      {
+        # sort correlation values
+        i <- order(rho)
+        rho <- rho[i]
+        label.vec <- label.vec[i]
+        
+        # count permuted correlation values above thresholds
+        j <- which(label.vec == 0)
+        output <- cbind(rho[j],(n.rho - cumsum(label.vec)[j])/n.rho)
+        colnames(output) <- c("rho.cutoff","FDR")
+        
+      }
+      if (direction == "descending")
+      {
+        # sort correlation values
+        i <- order(rho,decreasing = TRUE)
+        rho <- rho[i]
+        label.vec <- label.vec[i]
+        
+        # count permuted correlation values above thresholds
+        j <- which(label.vec == 0)
+        output <- cbind(rho[j],(n.rho - cumsum(label.vec)[j])/n.rho)
+        colnames(output) <- c("rho.cutoff","FDR")
+        
+      }
+      return(output)
+    } 
     msg <- sprintf("Parallel Job #%d: Processing iteration %d out of %d.\n", i, i, n.perm)
+    cat(msg)  # print the message directly within the function
     random.rho <- cor(datExpr, datExpr[perm.ind[[i]],], method = estimator, use = use.obs)
     if (direction == "absolute") random.rho <- abs(random.rho)
     random.rho <- as.vector(random.rho[upper.tri(random.rho)])
     dir <- ifelse(direction %in% c("absolute", "positive"), "ascending", "descending")
-    result <- count.FD2(random.rho, rho.thresh, direction = dir)
-    return(list(result=result, message=msg))
+    result <- count.FD(random.rho, rho.thresh, direction = dir)
+    return(result)
   }
   
-  cat(sprintf("Running with %d parallel jobs.\n", n.cores))
-  results <- mclapply(1:n.perm, permute_and_count, mc.cores = n.cores)
+  # Register parallel backend
+  cl <- makeCluster(n.cores)
+  registerDoParallel(cl)
   
-  # Extract and print messages:
-  for(res in results) {
-    cat(res$message)
+  # Parallel computation
+  results <- foreach(i=1:n.perm, .packages="MEGENA") %dopar% {
+    permute_and_count(i)
   }
-  count.out <- lapply(results, function(res) res$result)
+  
+  # Stop the cluster after parallel computation
+  stopCluster(cl)
+  
+  # Extract the results
+  count.out <- results
+  
   
   
   
   
   dir <- ifelse(direction %in% c("absolute", "positive"), "ascending", "descending")
-  PR <- count.FD2(as.vector(rho[upper.tri(rho)]), rho.thresh, direction = dir)
+  PR <- count.FD(as.vector(rho[upper.tri(rho)]), rho.thresh, direction = dir)
   
   
   PR = PR[,2]
@@ -125,6 +171,7 @@ calculate.rho.signed <- function(datExpr,n.perm,FDR.cutoff,estimator = "pearson"
   
   return(output)
 }
+
 
 
 
